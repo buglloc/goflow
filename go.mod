@@ -9,4 +9,5 @@ require (
 	github.com/prometheus/client_golang v0.9.2
 	github.com/sirupsen/logrus v1.4.1
 	github.com/stretchr/testify v1.3.0
+	github.com/xdg/scram v1.0.5
 )

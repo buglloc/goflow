@@ -17,11 +17,12 @@ import (
 )
 
 var (
-	KafkaTLS   *bool
-	KafkaSASL  *bool
-	KafkaTopic *string
-	KafkaSrv   *string
-	KafkaBrk   *string
+	KafkaTLS           *bool
+	KafkaSASL          *bool
+	KafkaSASLMechanism *string
+	KafkaTopic         *string
+	KafkaSrv           *string
+	KafkaBrk           *string
 
 	KafkaLogErrors *bool
 
@@ -53,7 +54,8 @@ func ParseKafkaVersion(versionString string) (sarama.KafkaVersion, error) {
 
 func RegisterFlags() {
 	KafkaTLS = flag.Bool("kafka.tls", false, "Use TLS to connect to Kafka")
-	KafkaSASL = flag.Bool("kafka.sasl", false, "Use SASL/PLAIN data to connect to Kafka (TLS is recommended and the environment variables KAFKA_SASL_USER and KAFKA_SASL_PASS need to be set)")
+	KafkaSASL = flag.Bool("kafka.sasl", false, "Use SASL data to connect to Kafka (TLS is recommended and the environment variables KAFKA_SASL_USER and KAFKA_SASL_PASS need to be set)")
+	KafkaSASLMechanism = flag.String("kafka.sasl.mechanism", "PLAIN", "SASL mechanism (available are: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512)")
 	KafkaTopic = flag.String("kafka.topic", "flow-messages", "Kafka topic to produce to")
 	KafkaSrv = flag.String("kafka.srv", "", "SRV record containing a list of Kafka brokers (or use kafka.out.brokers)")
 	KafkaBrk = flag.String("kafka.brokers", "127.0.0.1:9092,[::1]:9092", "Kafka brokers list separated by commas")
@@ -77,10 +79,10 @@ func StartKafkaProducerFromArgs(log utils.Logger) (*KafkaState, error) {
 	} else {
 		addrs = strings.Split(*KafkaBrk, ",")
 	}
-	return StartKafkaProducer(addrs, *KafkaTopic, *KafkaHashing, *KafkaKeying, *KafkaTLS, *KafkaSASL, *KafkaLogErrors, log)
+	return StartKafkaProducer(addrs, *KafkaTopic, *KafkaHashing, *KafkaKeying, *KafkaTLS, *KafkaSASL, *KafkaSASLMechanism, *KafkaLogErrors, log)
 }
 
-func StartKafkaProducer(addrs []string, topic string, hashing bool, keying string, useTls bool, useSasl bool, logErrors bool, log utils.Logger) (*KafkaState, error) {
+func StartKafkaProducer(addrs []string, topic string, hashing bool, keying string, useTls bool, useSasl bool, saslMechanism string, logErrors bool, log utils.Logger) (*KafkaState, error) {
 	kafkaConfig := sarama.NewConfig()
 	kafkaConfig.Version = kafkaConfigVersion
 	kafkaConfig.Producer.Return.Successes = false
@@ -107,6 +109,18 @@ func StartKafkaProducer(addrs []string, topic string, hashing bool, keying strin
 		kafkaConfig.Net.SASL.Enable = true
 		kafkaConfig.Net.SASL.User = os.Getenv("KAFKA_SASL_USER")
 		kafkaConfig.Net.SASL.Password = os.Getenv("KAFKA_SASL_PASS")
+		switch saslMechanism {
+		case "PLAIN":
+		case "SCRAM-SHA-256":
+			kafkaConfig.Net.SASL.SCRAMClient = &XDGSCRAMClient{HashGeneratorFcn: SHA256}
+			kafkaConfig.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA256
+		case "SCRAM-SHA-512":
+			kafkaConfig.Net.SASL.SCRAMClient = &XDGSCRAMClient{HashGeneratorFcn: SHA512}
+			kafkaConfig.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
+		default:
+			return nil, fmt.Errorf("unsupported SASL mechanism: %s", saslMechanism)
+		}
+
 		if kafkaConfig.Net.SASL.User == "" && kafkaConfig.Net.SASL.Password == "" {
 			return nil, errors.New("Kafka SASL config from environment was unsuccessful. KAFKA_SASL_USER and KAFKA_SASL_PASS need to be set.")
 		} else if log != nil {
